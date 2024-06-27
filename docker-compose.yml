@@ -1,0 +1,105 @@
+version: '3.7'
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: sh -c "gunicorn main.wsgi:application --bind 0.0.0.0:8000"
+    volumes:
+      - static_volume:/static
+      - media_volume:/media
+    expose:
+      - 8000
+    restart: unless-stopped
+    networks:
+      - network_main
+
+  db:
+    image: postgres:12
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    networks:
+      - network_main
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: sh -c "python manage.py run_bot"
+    volumes:
+      - static_volume:/static
+      - media_volume:/media
+    restart: unless-stopped
+    networks:
+      - network_main
+
+  nginx:
+    build: ./nginx
+    volumes:
+      - static_volume:/static
+      - media_volume:/media
+    ports:
+      - 80:80
+    depends_on:
+      - web
+    restart: unless-stopped
+    networks:
+      - network_main
+
+  redis:
+    image: redis
+    hostname: redis
+    networks:
+      - network_main
+
+  celeryworker:
+    build:
+      context: .
+    hostname: worker
+    entrypoint: celery
+    command:
+      -A main.celery.app worker --loglevel=info
+    volumes:
+      - ./service:/service
+    links:
+      - redis
+    depends_on:
+      - redis
+      - web
+    environment:
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+    networks:
+      - network_main
+
+  celerybeat:
+    build:
+      context: .
+    hostname: worker
+    entrypoint: celery
+    command:
+      -A main.celery.app beat --loglevel=info
+    volumes:
+      - ./service:/service
+    links:
+      - redis
+    depends_on:
+      - redis
+      - web
+    environment:
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+    networks:
+      - network_main
+
+volumes:
+  postgres_data:
+  static_volume:
+  media_volume:
+
+networks:
+  network_main:
